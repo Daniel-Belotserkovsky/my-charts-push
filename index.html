@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#131722">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>My Charts · התראות</title>
+<style>
+ body{margin:0;background:#0f1115;color:#d1d4dc;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+ main{max-width:460px;margin:0 auto;padding:28px 18px}
+ h1{font-size:22px;margin:0 0 4px;display:flex;align-items:center;gap:10px} h1 img{width:36px;border-radius:8px}
+ p{color:#9598a1;line-height:1.6;margin:6px 0 16px}
+ .card{background:#131722;border:1px solid #2a2e39;border-radius:10px;padding:16px;margin:14px 0}
+ button{width:100%;padding:13px;border:0;border-radius:8px;background:#2962ff;color:#fff;font-size:16px;cursor:pointer;margin-top:8px}
+ button.sec{background:#2a2e39} button:disabled{opacity:.5}
+ #status{font-weight:600} .ok{color:#089981} .bad{color:#f23645}
+ textarea{width:100%;box-sizing:border-box;height:110px;background:#0f1115;color:#d1d4dc;border:1px solid #2a2e39;border-radius:6px;font-size:11px;direction:ltr}
+ ol{padding-right:20px;color:#9598a1;line-height:1.7} a{color:#2962ff}
+</style>
+</head>
+<body><main>
+ <h1><img src="icon-192.png" alt="">My Charts · התראות</h1>
+ <p>הדף הזה מאפשר לטלפון לקבל התראות פוש מהמערכת שלך.</p>
+
+ <div class="card">
+  <div>סטטוס: <span id="status">בודק...</span></div>
+  <button id="enable">🔔 הפעל התראות במכשיר הזה</button>
+ </div>
+
+ <div class="card" id="codebox" style="display:none">
+  <div>קוד המנוי של המכשיר. העתק אותו והדבק באפליקציה, בלשונית ⚙️ הגדרות ← התראות פוש:</div>
+  <textarea id="code" readonly></textarea>
+  <button id="copy">📋 העתק קוד</button>
+  <button class="sec" id="openapp" style="display:none">פתח את האפליקציה</button>
+ </div>
+
+ <div class="card">
+  <b>בשיאומי, כדי שההתראות לא "ייתקעו":</b>
+  <ol>
+   <li>הגדרות ← אפליקציות ← Chrome ← <b>הפעלה אוטומטית (Autostart)</b>: להדליק</li>
+   <li>שם ← <b>חיסכון בסוללה</b> ← <b>ללא הגבלות</b></li>
+   <li>שם ← <b>התראות</b>: לוודא שמותר, כולל "התראות צפות" ו"מסך נעילה"</li>
+   <li>בתפריט של Chrome ← <b>הוסף למסך הבית / התקן אפליקציה</b>, כדי שיהיה אייקון של My Charts</li>
+  </ol>
+ </div>
+</main>
+<script>
+const qs = new URLSearchParams(location.search);
+// the app passes its public key and its address in the link; remember them for next visits
+for (const k of ['k', 'app']) if (qs.get(k)) localStorage.setItem('mc_' + k, qs.get(k));
+const KEY = localStorage.getItem('mc_k'), APP = localStorage.getItem('mc_app');
+const $ = id => document.getElementById(id);
+const setStatus = (t, cls) => { $('status').textContent = t; $('status').className = cls || ''; };
+
+function keyBytes(b64) {
+  const pad = '='.repeat((4 - b64.length % 4) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+}
+function showCode(sub) {
+  $('code').value = JSON.stringify(sub);
+  $('codebox').style.display = 'block';
+  if (APP) { $('openapp').style.display = 'block'; $('openapp').onclick = () => location.href = APP; }
+}
+
+async function init() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    setStatus('הדפדפן הזה לא תומך בפוש. פתח את הדף ב-Chrome.', 'bad'); $('enable').disabled = true; return;
+  }
+  if (!KEY) { setStatus('חסר מפתח. פתח את הדף דרך הקישור שבאפליקציה (⚙️ הגדרות).', 'bad'); $('enable').disabled = true; return; }
+  const reg = await navigator.serviceWorker.register('sw.js');
+  const sub = await reg.pushManager.getSubscription();
+  if (sub && Notification.permission === 'granted') { setStatus('✅ ההתראות פעילות במכשיר הזה', 'ok'); showCode(sub); $('enable').textContent = 'רענן מנוי'; }
+  else if (Notification.permission === 'denied') setStatus('ההתראות חסומות. אפשר אותן בהגדרות האתר ב-Chrome.', 'bad');
+  else setStatus('ההתראות עוד לא הופעלו');
+}
+
+$('enable').onclick = async () => {
+  try {
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') { setStatus('לא אושרו התראות', 'bad'); return; }
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (sub) await sub.unsubscribe();
+    sub = await reg.pushManager.subscribe({userVisibleOnly: true, applicationServerKey: keyBytes(KEY)});
+    setStatus('✅ ההתראות פעילות במכשיר הזה', 'ok'); showCode(sub);
+  } catch (e) { setStatus('שגיאה: ' + e.message, 'bad'); }
+};
+$('copy').onclick = async () => {
+  try { await navigator.clipboard.writeText($('code').value); $('copy').textContent = '✓ הועתק'; }
+  catch (_) { $('code').select(); document.execCommand('copy'); $('copy').textContent = '✓ הועתק'; }
+};
+init();
+</script>
+</body></html>
